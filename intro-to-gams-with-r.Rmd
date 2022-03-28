@@ -594,6 +594,7 @@ Nothing magical or mysterious. I leave it as an exercise to go through the rest 
 
 One interesting place to look, is to see how the multilevel data (eg = 6) is generated. This function is actually recursive in that it calls itself!
 
+One last piece of advice. If you would like to run this function line by line through the source code, type `debug(gamSim)` at the command line. Then the next time you use the function, you will enter debugger mode where you can walk through the source code. When you are done, type `undebug(gamSim)` so that you don't enter debug mode the next time you use the function
 
 ```{r, eval=F}
 f0 <- function(x) {

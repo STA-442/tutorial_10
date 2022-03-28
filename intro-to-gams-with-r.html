@@ -1676,6 +1676,7 @@
 <p>Then, depending on the distribution of the data, we create some noise and generate some y values.</p>
 <p>Nothing magical or mysterious. I leave it as an exercise to go through the rest of the function to try to understand how the data for these gams are created.</p>
 <p>One interesting place to look, is to see how the multilevel data (eg = 6) is generated. This function is actually recursive in that it calls itself!</p>
+<p>One last piece of advice. If you would like to run this function line by line through the source code, type <code>debug(gamSim)</code> at the command line. Then the next time you use the function, you will enter debugger mode where you can walk through the source code. When you are done, type <code>undebug(gamSim)</code> so that you don’t enter debug mode the next time you use the function</p>
 <div class="sourceCode" id="cb64"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb64-1"><a href="#cb64-1" aria-hidden="true" tabindex="-1"></a>f0 <span class="ot">&lt;-</span> <span class="cf">function</span>(x) {</span>
 <span id="cb64-2"><a href="#cb64-2" aria-hidden="true" tabindex="-1"></a>  <span class="dv">2</span> <span class="sc">*</span> <span class="fu">sin</span>(pi <span class="sc">*</span> x)</span>
 <span id="cb64-3"><a href="#cb64-3" aria-hidden="true" tabindex="-1"></a>}</span>
