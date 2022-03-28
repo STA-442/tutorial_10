@@ -1,0 +1,626 @@
+---
+title: ""
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = TRUE, 
+                      warning=F,
+                      message=F)
+```
+
+
+# Introduction
+
+This week in class, we looked at a particular technique for non-linear regression: the Geneneralized Additive Model, or GAM. In this tutorial, we will explore a particular package for fitting GAM's in the R language, the [`mgcv`](https://cran.r-project.org/web/packages/mgcv/index.html) package. 
+
+We will explore a little bit of the theory, fit some models and demonstrate how to work with the fitted model objects in R. 
+
+To work with the code in this tutorial, you will need to install the `mgcv` package and the [`tidymv` package](https://github.com/stefanocoretta/tidymv)
+
+
+```{r,eval=F}
+# install the mgcv package
+install.packages('mgcv')
+install.packages('tidymv')
+```
+
+## Introduction to GAMs
+
+A generalized additive model is a generalized linear model where the linear predictor includes a sum of smoothed functions of the covariates. 
+
+For example, we might see something like
+
+$$g(\mu_i) = X_i\theta + f_1(x_{1i}) + f_2(x_{2i}) + + f_1(x_{3i}, x_{4i})$$
+
+Where
+
+$$\mu_i = E(Y_i) \text{ and } Y_i \sim \text{ some exponential family member}$$
+In the above
+
+- $Y_i$ is the response variable 
+- $X_i$ is a row of the model matrix for any strictly parametric model components
+- $\theta$ is the parameter vector associated with the effects of $X$
+- $f_1$, $f_2$, and $f_3$ are smoothed functions of the covariates $x_1$, $x_2$, and $x_3$ and $x_4$ respectively. 
+
+
+You can imagine the flexibility a model like this allows. You can input variables in all the ways we did with regular regression models - categorical, continuous, interactions - but can now introduce smooth function terms.  
+
+
+## GAMs in practice 
+
+We are going to look at the cherry tree data found in the data folder. 
+
+The cherry tree data provides the diameter, height and volume measurements of the timber in 31 felled black cherry trees. 
+
+
+```{r, warning=F, message=F}
+# load the required R packages
+library(tidyverse)
+library(gt)
+library(mgcv)
+
+# read in the data
+trees <- readr::read_csv('data/cherry-trees.csv')
+
+trees %>% 
+  head() %>%
+  gt() %>% 
+  tab_header(title = "Cherry Trees data",
+             subtitle = "First 6 observations")
+```
+
+The data contains the following variables:
+
+- diameter: tree diameter in inches
+- height: tree height in feet
+- volume: tree volume in cubic feet
+
+We are going to model the log volume of a tree as a function of its height and girth. 
+
+Lets begin with a basic description of the data and some plots.
+
+```{r}
+
+# summarize each variable
+trees %>% 
+  pivot_longer(everything(), names_to = "variable",
+               values_to = "value") %>% 
+  group_by(variable) %>% 
+  summarize_if(is.numeric,
+    .funs = c("n_distinct", # the number of  unique values
+             "min", # the minimum value
+             "max", # the maximum value
+             "mean", # the mean
+             "median", # the median value
+             "sd") 
+  ) %>% 
+  gt() %>% 
+  tab_header(title = "Summary statistics for the Cherry Tree data")
+
+
+trees %>% 
+  ggplot(aes(diameter, volume)) +
+  geom_point() +
+  geom_smooth() +
+  labs(x = "Tree Diameter in inches",
+       y = "Tree volume in cubic feet",
+       title = "Relationship between tree diameter and tree volume") +
+  theme_bw()
+
+
+
+
+trees %>% 
+  ggplot(aes(height, volume)) +
+  geom_point() +
+  geom_smooth() +
+  labs(x = "Tree Height in inches",
+       y = "Tree volume in cubic feet",
+       title = "Relationship between tree height and tree volume") +
+  theme_bw()
+
+
+
+trees %>% 
+  ggplot(aes(diameter, height, size = volume)) +
+  geom_point() +
+  labs(x = "Tree diameter in inches",
+       y = "Tree height in feet",
+       title = "Relationship between tree height, diameter and volume") +
+  theme_bw()
+
+```
+
+THe plots above show a strong but non linear relationship between both height and diameter on volume. 
+
+We are going to fit the following model:
+
+$$log(E(\text{volume}_i)) = f_1(\text{height}_i)
+ + f_2(\text{diameter}_i) \text{ where } \text{volume}_i \sim \text{Gamma}$$
+ 
+The functions $f_1$ and $f_2$ are smooth functions. The degree of smoothness will be estimated within certain limits using  the `gam()` function from the `mgcv` package:
+ 
+ 
+```{r}
+
+model_1 <- gam(volume ~ s(height) + s(diameter), 
+               family = Gamma(link=log),
+               data = trees)
+
+# model summary
+summary(model_1)
+
+
+```
+
+The summary method displays:
+
+- The family and link functions
+- The formula for the model we fit
+- The estimated parametric coefficients (i.e just the intercept in this case)
+- For each smoothing function, the effective degrees of freedon (edf). 
+  - For height, 1 edf, essentially a straigt line
+  - for diameter, a smooth curve with 2.4 degrees of freedom. 
+
+The total degrees of freem for the model is the sum of the edf's plus one for the model intercept. 
+
+There are several ways to plot the smoothed functions from the fitted object. We will highlight two methods here:
+
+- Using the default plot method. This generates plots using R's base graphics
+- Using the `plot_smooths()` function from the tidymv package
+
+```{r}
+library(tidymv)
+
+# model plots using base R graphics 
+plot(model_1)
+
+
+p1 <- plot_smooths(
+    model = model_1,
+    series = height
+)
+
+p2 <- plot_smooths(
+    model = model_1,
+    series = diameter
+)
+
+cowplot::plot_grid(p1, p2)
+
+```
+
+
+Both methods create similar plots. The choice depends on coding standards/preferences and taste. We see that the effect of height on volume is essentially linear while there is a slight curve in the relationship beween diameter and volume. Both plots display 95% confidence intervals. 
+
+
+We can also plot the residuals of each smoothed function against the data.
+
+
+
+```{r}
+library(tidymv)
+
+# model plots using base R graphics 
+plot(model_1)
+
+
+p1 <- plot_smooths(
+    model = model_1,
+    series = height
+)
+
+p2 <- plot_smooths(
+    model = model_1,
+    series = diameter
+)
+
+cowplot::plot_grid(p1, p2)
+
+```
+
+ 
+We can also plot partial residuals for each smoothing function against the raw data:
+
+This method is only available with the base plot function
+
+```{r}
+plot(model_1, residuals=T)
+```
+ 
+These plots give:
+
+$$\hat{\epsilon}_{1i}^{\text{partial}} = f_1(\text{height}_i) + \hat{\epsilon}_i^p$$
+
+and 
+
+$$\hat{\epsilon}_{2i}^{\text{partial}} = f_1(\text{diameter}_i) + \hat{\epsilon}_i^p$$
+
+
+Where $\hat{\epsilon}_i^p$ is a pearson residual.
+
+If the model fits well, the partial residuals should be
+evenly scattered around the curve to which they relate
+
+
+### Finer control of the gam function
+
+Above we illustrated the basic use of the gam function. Here we dig in a little deeper. 
+
+The first choice we must make is on the basis used for the smooth terms. The default form the gam function is the thin plate regression spline. This basis is a good first choice, but can be computationally expensive for larger datasets. 
+
+Below we use the penalized cubic regression spline, by specifying the option `bs = "cr"`
+
+
+
+```{r}
+model_2 <- gam(volume ~ s(height, bs="cr") + s(diameter, bs="cr"), 
+               family = Gamma(link=log),
+               data = trees)
+
+summary(model_2)
+```
+
+The change in the basis function has made little difference here to our model fit. This is good news since we don't want our model results to depend stronly on the exact choice of basis. (NOTE: If we choose a wildly different basis like with P-splines, then we will see differences)
+
+We can also choose the dimension of our basis that represents the smoothed terms, $k$. The default value is $k=10$. This sets the maximum degrees of freedom allowed for each term. The larger this number, the more the smoothed term can "wiggle". The actual effective degrees of freedom, for each term, will  be estimated from the data.
+
+Below we fit a model with $k = 20$ for the diameter smoothing term.
+
+```{r}
+model_3 <- gam(volume ~ s(height) + s(diameter, bs="cr", k = 20), 
+               family = Gamma(link=log),
+               data = trees)
+
+summary(model_3)
+```
+
+Note that in the above we also didn't change the basis for the height parameter. This is to show that we can mix bases. Here we see little difference again in the model fit. 
+
+
+### Smoothing over more than 1 variable
+
+We are not restricted to models with a smooth for one predictor. Below we fit a model with a function of both height and diameter.
+
+$$log(E(\text{volume}_i)) = f(\text{height}_i, \text{diameter}_i)\text{ where } \text{volume}_i \sim \text{Gamma}$$
+```{r}
+model_4 <- gam(volume ~ s(height, diameter, k = 25), 
+               family = Gamma(link=log),
+               data = trees)
+
+# model summary
+summary(model_4)
+
+# model plot
+plot(model_4,too.far=0.15)
+
+```
+
+The default spline used in this case is the thing plate splite (option specified as `bs="tp"`). The bold contours show the estimate of the smooth while the dashed contours show the smooth plus the standard error of the smooth. Parts of the smooths that
+are far away from covariate values have been excluded from the plots using the too.far
+
+Below we specify a model with tensor products as the basis, using `te` instead of `s`.
+
+
+```{r}
+model_5 <- gam(volume ~ te(height, diameter, k = 5), 
+               family = Gamma(link=log),
+               data = trees)
+
+# model summary
+summary(model_5)
+
+```
+
+The tensor product model has 3 effective degrees of freedom. It is equivalent to the following model:
+
+
+$$log(E(\text{volume}_i)) = \text{height}_i + 
+ \text{diameter}_i + \text{height}_i:\text{diameter}_i $$
+ 
+The wiggly component of the model has been penalized away. 
+
+
+### Models with Parametric and smoothed terms
+
+In the 5 models we fit above, we only used smoothed terms. There is no harm or difficulty in including both parametric terms and smoothed terms. 
+
+Below we will imagine that our height variable is only measured as a categorical variable with the levels: "small", "medium", and "large"
+
+
+```{r}
+trees <- trees %>% 
+  mutate(height_class = case_when(
+    floor(height/10) == 6 ~ "small",
+    floor(height/10) == 7 ~ "medium",
+    floor(height/10) == 8 ~ "large"
+  ))
+
+trees %>% 
+  count(height_class)
+```
+
+We now fit a model with the categorical height variable and a smoothed term for tree diameter. 
+
+
+```{r}
+model_6 <- gam(volume ~ height_class + s(diameter), 
+               family = Gamma(link=log),
+               data = trees)
+
+# model summary
+summary(model_6)
+
+plot_smooths(model_6, series = diameter, comparison = height_class)
+```
+
+In the summary we see the difference between medium and large trees and the difference between small and large trees (both statistically significant). 
+
+
+### More on basis functions
+
+The smooth term in our model is a sum of some number of functions. For example, for our relationship between diameter and volume:
+
+$$f_2(\text{diameter}_i) = \sum_{j=1}^k b_j(\text{diameter}_i)\beta_j$$
+
+We can actually extract these basis functions from our model object with the `predict()` function.  Here we extract a prediction matrix $X_p$ that maps the model parameters $\hat{\beta}$ to the predictions of the linear predictor $\hat{\eta}_p$. That is we extract the matrix $X_p$ that gives
+
+$$\hat{\eta}_p = X_p\hat{\beta}$$
+
+Here we work with an even simpler model with just a smoothed term for diameter.
+
+```{r}
+model_fit <- gam(volume ~ s(diameter), 
+               family = Gamma(link=log),
+               data = trees)
+X_p <- predict(model_fit, type = "lpmatrix")
+
+# class of the R object
+class(X_p) # its a matrix and array
+
+# the dimensions
+dim(X_p)
+
+# the column names
+colnames(X_p)
+
+```
+
+We can get the linear predictor by multiplying our coefficients $\hat{\beta}$ onto this matrix. 
+
+
+```{r}
+# what are the coefficient names
+names( coef(model_fit))
+
+pred <- X_p %*% coef(model_fit)
+head(pred)
+```
+Remember that this is just the linear predictor. To get back to the original scale we need to use the inverse link function (exp)
+
+```{r}
+# method 1 using the model object
+predictions1 <- model_fit$family$linkinv(pred)
+
+# method 2 using exp()
+predictions2 <- exp(pred)
+
+# are they the same
+all.equal(predictions1, predictions2)
+
+# plot against the data
+
+trees %>% 
+  mutate(pred = predictions1) %>% 
+  ggplot(aes(diameter, volume)) +
+  geom_point() + 
+  geom_point(aes(diameter, pred, color="prediction"))
+
+```
+
+
+Why is it useful to extract the predictions this way. 
+
+The main benefit is in calculating the variance for combinations of linear predictor values. 
+
+Let $\hat{V}_\beta$ be the estimate of the parameter covariance matrix. It follows that the variance of the estimated linear predictor is then:
+
+$$\hat{V}_{\hat{\eta}_p} = X_p\hat{V}_\beta X_p^T$$
+
+
+Now, let's say we want to look at the difference in predicted values for two different diameters, say diameter at 11 and 18
+
+
+```{r}
+new_data <- data.frame(diameter = c(11, 18))
+X_p <- predict(model_fit, 
+               newdata = new_data,
+               type = "lpmatrix")
+
+lin_pred <- X_p%*% coef(model_fit)
+```
+
+We can model the difference as $\delta = d^T\eta_p$ where $d^t=[1,-1]$. The variance of this differnce is then given by:
+
+$$\text{var}(\delta) = d^T\hat{V}_{\eta_p} d = d^T X_p\hat{V}_\beta X_p^Td$$
+
+Which we can do easily with R:
+
+
+```{r}
+d <- t(c(1, -1))
+
+# the difference
+d %*% lin_pred
+
+# the variance of the difference
+
+d %*% X_p %*% model_fit$Vp %*% t(X_p) %*%t(d)
+
+
+```
+
+Note the use of `model_fit$Vp` above to get $v_\beta$. 
+
+
+
+### Model diagnostics
+
+We can evaluate the significance of our parameters (both parametric and smoothed) using the anova function
+
+
+```{r}
+anova(model_6)
+```
+
+We have strong evidence that both Height and Girth matter in predicting tree volume. 
+
+We can also extract AIC from the model as we have done in the past
+
+```{r}
+AIC(model_6)
+```
+
+We can also use the gam.check function which provides diagnostic plots for our use. 
+
+
+```{r}
+gam.check(model_6)
+
+```
+
+
+## Understanding models (and R!) through simulation
+
+We have stressed over and over through this course the power of simulation how the assumptions of a model could generate the data we see. We have often written our own simulation functions to simulate data for or from a model, however, there are tons of well written functions which we can use for these purposes.
+
+Reading these functions is very helpful for:
+
+1. Learning how models work
+2. Learning how R works
+
+I often recommend that students spend time looking at functions and trying to understand how they work. In the rest of this tutorial we will briefly present the `gamSim()` function from the mgcv package. It will be left to the students to spend more time with the function to understand its inner workings. 
+
+### Working with a new function
+
+
+When presented with a new function, let's say `mgcv::gamSim()`, the first thing you want to do is have a look at any provided documentation. This can be accomplished with:
+
+
+```{r, eval=F}
+# to look at help files
+?mgcv::gamSim
+```
+
+The help file tells us that this function is used:
+
+````
+Function used to simulate data sets to illustrate the use of gam and gamm. Mostly used in help files to keep down the length of the example code sections.
+````
+
+There are a number of input arguments:
+
+- `eg` - numeric value specifying the example required.
+- `n` - number of data to simulate.
+- `dist` - character string which may be used to specify the distribution of the response.
+- `scale` - Used to set noise level.
+- `verbose` - Should information about simulation type be printed?
+
+The next thing we should notice is that there are some default values from this function. Specifically:
+
+````
+gamSim(eg=1,n=400,dist="normal",scale=2,verbose=TRUE)
+````
+
+so `eg` is set to 1, `n` is set to 400, `dist` is set to normal, `scale` is 2 and `verbose` is TRUE. So it looks like, given the defaults we can run the function without giving any inputs. Let's try:
+
+
+```{r}
+# run the function
+sim_results <- gamSim() 
+# what class is it
+class(sim_results)
+# what are the dimensions
+dim(sim_results)
+
+# a look at the first few rows
+DT::datatable(head(sim_results), options= list(scrollX=T))
+
+```
+
+Okay, so we get a data with 400 observations and 10 variables. We also see a little bit of info printed as the function runs because `verbose` is set to TRUE. 
+
+So, now we might ask ourselves what does `eg` actually represent. Well, fortunately the help file tells us. We can specify 7 different example for simulation:
+
+1. Gu and Wahba 4 univariate term example.
+2. A smooth function of 2 variables.
+3. Example with continuous by variable.
+4. Example with factor by variable.
+5. An additive example plus a factor variable.
+6. Additive + random effect.
+7. As 1 but with correlated covariates.
+
+
+If, we want more details on these, we can either search the web, or start digging into the source code. To see the source code for most R functions, you simply need to type the function with no brackets into the command line.
+
+```{r}
+gamSim
+```
+
+I won't go into too much detail here, but the place you want to look for the meaty part of this code, is where the $y$-values get generated for each example. 
+
+Let's look at case 1. There are 3 acceptable scenarios
+
+- normal distribution
+- poisson distribuion
+- binary distribution
+
+Below is the code for the first example (cleaned up a bit by me for readability)
+
+We first create a random uniform variable called x. 
+
+We then create 3 functions of this variable, `f0`, `f1`, `f2`.
+
+We then create a function which is the three functions added together (`f <- f0(x0) + f1(x1) + f2(x2)`)
+
+Then, depending on the distribution of the data, we create some noise and generate some y values. 
+
+Nothing magical or mysterious. I leave it as an exercise to go through the rest of the function to try to understand how the data for these gams are created. 
+
+One interesting place to look, is to see how the multilevel data (eg = 6) is generated. This function is actually recursive in that it calls itself!
+
+
+```{r, eval=F}
+f0 <- function(x) {
+  2 * sin(pi * x)
+}
+
+f1 <- function(x) {
+  exp(2 * x)
+}
+f2 <- function(x) {
+  0.2 * x^11 * (10 * (1 - x))^6 + 10 * (10 * x)^3 * (1 - x)^10
+}
+
+f <- f0(x0) + f1(x1) + f2(x2)
+
+ if (dist == "normal") {
+     e <- rnorm(n, 0, scale)
+     y <- f + e
+ }
+ else if (dist == "poisson") {
+     g <- exp(f * scale)
+     f <- log(g)
+     y <- rpois(rep(1, n), g)
+}
+ else if (dist == "binary") {
+     f <- (f - 5) * scale
+    g <- binomial()$linkinv(f)
+    y <- rbinom(g, 1, g)
+ }
+```
